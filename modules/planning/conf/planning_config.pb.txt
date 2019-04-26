@@ -4,6 +4,7 @@ standard_planning_config {
   planner_public_road_config {
      scenario_type: LANE_FOLLOW
      scenario_type: SIDE_PASS
+     scenario_type: BARE_INTERSECTION_UNPROTECTED
      scenario_type: STOP_SIGN_UNPROTECTED
      scenario_type: TRAFFIC_LIGHT_PROTECTED
      scenario_type: TRAFFIC_LIGHT_UNPROTECTED_LEFT_TURN
@@ -34,6 +35,16 @@ default_task_config: {
     dl_weight: 50.0
     ddl_weight: 1000.0
     dddl_weight: 10000.0
+  }
+}
+default_task_config: {
+  task_type: PIECEWISE_JERK_SPEED_OPTIMIZER
+  piecewise_jerk_speed_config {
+    s_weight: 1.0
+    ds_weight: 100.0
+    dds_weight: 10.0
+    ddds_weight: 30.0
+    ref_weight: 50.0
   }
 }
 default_task_config: {
@@ -149,7 +160,7 @@ default_task_config: {
     dl_weight: 10.0
     ddl_weight: 1000.0
     dddl_weight: 100.0
-    guiding_line_weight: 0.1
+    guiding_line_weight: 1.0
   }
 }
 default_task_config: {
@@ -169,6 +180,7 @@ default_task_config: {
     static_obs_nudge_speed_ratio: 0.6
     dynamic_obs_nudge_speed_ratio: 0.8
     centri_jerk_speed_coeff: 1.0
+    max_valid_stop_distance: 0.25
   }
 }
 default_task_config: {
@@ -188,21 +200,7 @@ default_task_config: {
     static_obs_nudge_speed_ratio: 0.6
     dynamic_obs_nudge_speed_ratio: 0.8
     centri_jerk_speed_coeff: 1.0
-  }
-}
-default_task_config: {
-  task_type: OPEN_SPACE_TRAJECTORY_PARTITION
-  open_space_trajectory_partition_config {
-    gear_shift_max_t: 3.0
-    gear_shift_unit_t: 0.02
-    gear_shift_period_duration: 2.0
-    interpolated_pieces_num: 20
-    initial_gear_check_horizon: 3
-    heading_search_range: 0.79
-    heading_track_range: 1.57
-    vehicle_box_iou_threshold: 0.8
-    distance_search_range: 1.0
-    distance_to_midpoint: 0.1
+    max_valid_stop_distance: 0.25
   }
 }
 default_task_config: {
@@ -220,7 +218,7 @@ default_task_config: {
           traj_gear_switch_penalty: 10.0
           traj_steer_penalty: 0.0
           traj_steer_change_penalty: 0.0
-          grid_a_star_xy_resolution: 1.0
+          grid_a_star_xy_resolution: 0.5
           node_radius: 0.5
         }
         dual_variable_warm_start_config {
@@ -239,7 +237,7 @@ default_task_config: {
             ipopt_recalc_y: "yes"
           }
           qp_format: OSQP
-          min_safety_distance: 0.0
+          min_safety_distance: 0.01
         }
         distance_approach_config {
           weight_steer: 0.3
@@ -249,12 +247,12 @@ default_task_config: {
           weight_x: 2.3
           weight_y: 0.7
           weight_phi: 1.5
-          weight_v: 3.75
+          weight_v: 0.0
           weight_steer_stitching: 1.75
           weight_a_stitching: 3.25
           weight_first_order_time: 4.25
           weight_second_order_time: 13.5
-          min_safety_distance: 0.0
+          min_safety_distance: 0.01
           max_speed_forward: 2.0
           max_speed_reverse: 1.0
           max_acceleration_forward: 2.0
@@ -277,8 +275,6 @@ default_task_config: {
             ipopt_mu_init: 0.1
           }
           enable_constraint_check: false
-          enable_hand_derivative: false
-          enable_derivative_check: false
           enable_initial_final_check: false
         }
         delta_t: 0.5
@@ -290,13 +286,32 @@ default_task_config: {
   }
 }
 default_task_config: {
+  task_type: OPEN_SPACE_TRAJECTORY_PARTITION
+  open_space_trajectory_partition_config {
+    gear_shift_max_t: 3.0
+    gear_shift_unit_t: 0.02
+    gear_shift_period_duration: 2.0
+    interpolated_pieces_num: 10
+    initial_gear_check_horizon: 15
+    heading_search_range: 0.79
+    heading_track_range: 1.57
+    vehicle_box_iou_threshold: 0.9
+    distance_search_range: 2.0
+    distance_to_midpoint: 0.1
+  }
+}
+default_task_config: {
   task_type: OPEN_SPACE_ROI_DECIDER
   open_space_roi_decider_config {
     roi_longitudinal_range: 15
     parking_start_range: 20.0
     parking_inwards: false
-    enable_perception_obstacles: false
+    enable_perception_obstacles: true
     parking_depth_buffer: 0.2
+    roi_linesegment_min_angle: 0.15
+    roi_linesegment_length: 1.0
+    perception_obstacle_filtering_distance: 1000.0
+    perception_obstacle_buffer: 0.0
   }
 }
 default_task_config: {
@@ -304,6 +319,12 @@ default_task_config: {
   open_space_fallback_decider_config {
     open_space_prediction_time_period: 5.0
     open_space_fall_back_collision_distance: 5.0
-    open_space_fall_back_stop_safety_gap: 1.0
+    open_space_fall_back_stop_distance: 2.0
+  }
+}
+default_task_config: {
+  task_type: PATH_BOUNDS_DECIDER
+  path_bounds_decider_config {
+    is_lane_borrowing: false
   }
 }

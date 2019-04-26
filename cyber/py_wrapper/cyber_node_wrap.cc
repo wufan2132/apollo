@@ -53,7 +53,8 @@ PyObject *cyber_new_PyWriter(PyObject *self, PyObject *args) {
   apollo::cyber::PyWriter *writer = new apollo::cyber::PyWriter(
       (std::string const &)*channel_name, (std::string const &)*data_type,
       qos_depth, node);
-  PyObject *pyobj_writer = PyCapsule_New(writer, "apollo_cyber_pywriter", NULL);
+  PyObject *pyobj_writer =
+      PyCapsule_New(writer, "apollo_cyber_pywriter", nullptr);
   return pyobj_writer;
 }
 
@@ -116,7 +117,8 @@ PyObject *cyber_new_PyReader(PyObject *self, PyObject *args) {
   apollo::cyber::PyReader *reader =
       new apollo::cyber::PyReader((std::string const &)*channel_name,
                                   (std::string const &)*data_type, node);
-  PyObject *pyobj_reader = PyCapsule_New(reader, "apollo_cyber_pyreader", NULL);
+  PyObject *pyobj_reader =
+      PyCapsule_New(reader, "apollo_cyber_pyreader", nullptr);
   return pyobj_reader;
 }
 
@@ -206,7 +208,8 @@ PyObject *cyber_new_PyClient(PyObject *self, PyObject *args) {
   apollo::cyber::PyClient *client =
       new apollo::cyber::PyClient((std::string const &)*channel_name,
                                   (std::string const &)*data_type, node);
-  PyObject *pyobj_client = PyCapsule_New(client, "apollo_cyber_pyclient", NULL);
+  PyObject *pyobj_client =
+      PyCapsule_New(client, "apollo_cyber_pyclient", nullptr);
   return pyobj_client;
 }
 
@@ -272,7 +275,7 @@ PyObject *cyber_new_PyService(PyObject *self, PyObject *args) {
       new apollo::cyber::PyService((std::string const &)*channel_name,
                                    (std::string const &)*data_type, node);
   PyObject *pyobj_service =
-      PyCapsule_New(service, "apollo_cyber_pyservice", NULL);
+      PyCapsule_New(service, "apollo_cyber_pyservice", nullptr);
   return pyobj_service;
 }
 
@@ -363,7 +366,7 @@ PyObject *cyber_new_PyNode(PyObject *self, PyObject *args) {
 
   apollo::cyber::PyNode *node =
       new apollo::cyber::PyNode((std::string const &)node_name);
-  PyObject *pyobj_node = PyCapsule_New(node, "apollo_cyber_pynode", NULL);
+  PyObject *pyobj_node = PyCapsule_New(node, "apollo_cyber_pynode", nullptr);
   return pyobj_node;
 }
 
@@ -408,7 +411,8 @@ PyObject *cyber_PyNode_create_writer(PyObject *self, PyObject *args) {
     AERROR << "cyber_PyNode_create_writer:writer is null!";
     return Py_None;
   }
-  PyObject *pyobj_writer = PyCapsule_New(writer, "apollo_cyber_pywriter", NULL);
+  PyObject *pyobj_writer =
+      PyCapsule_New(writer, "apollo_cyber_pywriter", nullptr);
   return pyobj_writer;
 }
 
@@ -434,7 +438,8 @@ PyObject *cyber_PyNode_create_reader(PyObject *self, PyObject *args) {
       (apollo::cyber::PyReader *)(node->create_reader(
           (std::string const &)channel_name, (std::string const &)type_name));
 
-  PyObject *pyobj_reader = PyCapsule_New(reader, "apollo_cyber_pyreader", NULL);
+  PyObject *pyobj_reader =
+      PyCapsule_New(reader, "apollo_cyber_pyreader", nullptr);
   return pyobj_reader;
 }
 
@@ -459,7 +464,8 @@ PyObject *cyber_PyNode_create_client(PyObject *self, PyObject *args) {
   apollo::cyber::PyClient *client =
       (apollo::cyber::PyClient *)(node->create_client(
           (std::string const &)channel_name, (std::string const &)type_name));
-  PyObject *pyobj_client = PyCapsule_New(client, "apollo_cyber_pyclient", NULL);
+  PyObject *pyobj_client =
+      PyCapsule_New(client, "apollo_cyber_pyclient", nullptr);
 
   return pyobj_client;
 }
@@ -487,7 +493,7 @@ PyObject *cyber_PyNode_create_service(PyObject *self, PyObject *args) {
       (apollo::cyber::PyService *)(node->create_service(
           (std::string const &)channel_name, (std::string const &)type_name));
   PyObject *pyobj_service =
-      PyCapsule_New(service, "apollo_cyber_pyservice", NULL);
+      PyCapsule_New(service, "apollo_cyber_pyservice", nullptr);
   return pyobj_service;
 }
 
@@ -531,6 +537,92 @@ PyObject *cyber_PyNode_register_message(PyObject *self, PyObject *args) {
   return Py_None;
 }
 
+PyObject *cyber_PyChannelUtils_get_msg_type(PyObject *self, PyObject *args) {
+  char *channel_name = nullptr;
+  Py_ssize_t len = 0;
+  unsigned char sleep_s = 0;
+  if (!PyArg_ParseTuple(
+          args, const_cast<char *>("s#B:cyber_PyChannelUtils_get_msg_type"),
+          &channel_name, &len, &sleep_s)) {
+    AERROR << "cyber_PyChannelUtils_get_msg_type failed!";
+    return PyString_FromStringAndSize("", 0);
+  }
+  std::string channel(channel_name, len);
+  std::string msg_type =
+      apollo::cyber::PyChannelUtils::get_msgtype_by_channelname(channel,
+                                                                sleep_s);
+  return PyString_FromStringAndSize(msg_type.c_str(), msg_type.size());
+}
+
+PyObject *cyber_PyChannelUtils_get_debugstring_by_msgtype_rawmsgdata(
+    PyObject *self, PyObject *args) {
+  char *msgtype = nullptr;
+  char *rawdata = nullptr;
+  Py_ssize_t len = 0;
+  if (!PyArg_ParseTuple(
+          args,
+          const_cast<char *>(
+              "ss#:cyber_PyChannelUtils_get_debugstring_by_msgtype_rawmsgdata"),
+          &msgtype, &rawdata, &len)) {
+    AERROR
+        << "cyber_PyChannelUtils_get_debugstring_by_msgtype_rawmsgdata failed!";
+    return PyString_FromStringAndSize("", 0);
+  }
+  std::string raw_data(rawdata, len);
+  std::string debug_string =
+      apollo::cyber::PyChannelUtils::get_debugstring_by_msgtype_rawmsgdata(
+          msgtype, raw_data);
+  return PyString_FromStringAndSize(debug_string.c_str(), debug_string.size());
+}
+
+static PyObject *cyber_PyChannelUtils_get_active_channels(PyObject *self,
+                                                          PyObject *args) {
+  unsigned char sleep_s = 0;
+  if (!PyArg_ParseTuple(
+          args,
+          const_cast<char *>("B:cyber_PyChannelUtils_get_active_channels"),
+          &sleep_s)) {
+    AERROR << "cyber_PyChannelUtils_get_active_channels failed!";
+    return Py_None;
+  }
+
+  std::vector<std::string> channel_list =
+      apollo::cyber::PyChannelUtils::get_active_channels(sleep_s);
+  PyObject *pyobj_list = PyList_New(channel_list.size());
+  size_t pos = 0;
+  for (const std::string &channel : channel_list) {
+    PyList_SetItem(pyobj_list, pos, Py_BuildValue("s", channel.c_str()));
+    pos++;
+  }
+
+  return pyobj_list;
+}
+
+// return dict value look like:
+// {  'channel1':[atrr1, atrr2, atrr3],
+//    'channel2':[atrr1, atrr2]
+// }
+static PyObject *cyber_PyChannelUtils_get_channels_info(PyObject *self,
+                                                        PyObject *args) {
+  auto channelsinfo = apollo::cyber::PyChannelUtils::get_channels_info();
+  PyObject *pyobj_channelinfo_dict = PyDict_New();
+  for (auto &channelinfo : channelsinfo) {
+    std::string channel_name = channelinfo.first;
+    PyObject *bld_name = Py_BuildValue("s", channel_name.c_str());
+    std::vector<std::string> &roleAttr_list = channelinfo.second;
+    PyObject *pyobj_list = PyList_New(roleAttr_list.size());
+
+    size_t pos = 0;
+    for (auto &attr : roleAttr_list) {
+      PyList_SetItem(pyobj_list, pos,
+                     Py_BuildValue("s#", attr.c_str(), attr.size()));
+      pos++;
+    }
+    PyDict_SetItem(pyobj_channelinfo_dict, bld_name, pyobj_list);
+    Py_DECREF(bld_name);
+  }
+  return pyobj_channelinfo_dict;
+}
 /////////////////////////////////////////////////////////////////////
 //// debug pyobject
 /////////////////////////////////////////////////////////////////////
@@ -578,7 +670,7 @@ PyObject *cyber_test1(PyObject *self, PyObject *args) {
 
   student *stu = cyber_student();
   // ptr->pyobj
-  PyObject *py_stu = PyCapsule_New(stu, "student", NULL);
+  PyObject *py_stu = PyCapsule_New(stu, "student", nullptr);
   AINFO << "capsule name->" << PyCapsule_GetName(py_stu);
 
   AINFO << "===========================";
@@ -586,7 +678,7 @@ PyObject *cyber_test1(PyObject *self, PyObject *args) {
   std::vector<std::string> *strPtrV = new std::vector<std::string>;
   strPtrV->push_back("ywf");
   strPtrV->push_back("lj");
-  PyObject *py_stu1 = PyCapsule_New(strPtrV, "studentptr", NULL);
+  PyObject *py_stu1 = PyCapsule_New(strPtrV, "studentptr", nullptr);
   AINFO << "capsule name->" << PyCapsule_GetName(py_stu1);
 
   std::vector<std::string> *stu1_ptr =
@@ -633,6 +725,16 @@ static PyMethodDef _cyber_node_methods[] = {
     {"PyNode_create_reader", cyber_PyNode_create_reader, METH_VARARGS, ""},
     {"PyNode_create_client", cyber_PyNode_create_client, METH_VARARGS, ""},
     {"PyNode_create_service", cyber_PyNode_create_service, METH_VARARGS, ""},
+
+    {"PyChannelUtils_get_msg_type", cyber_PyChannelUtils_get_msg_type,
+     METH_VARARGS, ""},
+    {"PyChannelUtils_get_debugstring_by_msgtype_rawmsgdata",
+     cyber_PyChannelUtils_get_debugstring_by_msgtype_rawmsgdata, METH_VARARGS,
+     ""},
+    {"PyChannelUtils_get_active_channels",
+     cyber_PyChannelUtils_get_active_channels, METH_VARARGS, ""},
+    {"PyChannelUtils_get_channels_info", cyber_PyChannelUtils_get_channels_info,
+     METH_VARARGS, ""},
 
     // for test
     {"cyber_test0", cyber_test0, METH_VARARGS, "test parms input."},

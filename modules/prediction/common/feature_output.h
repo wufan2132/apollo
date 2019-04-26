@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "modules/prediction/proto/offline_features.pb.h"
+#include "modules/prediction/proto/prediction_obstacle.pb.h"
 
 namespace apollo {
 namespace prediction {
@@ -59,7 +60,8 @@ class FeatureOutput {
    */
   static void InsertDataForLearning(const Feature& feature,
                                     const std::vector<double>& feature_values,
-                                    const std::string& category);
+                                    const std::string& category,
+                                    const LaneSequence* lane_sequence_ptr);
 
   /**
    * @brief Insert a prediction result with predicted trajectories

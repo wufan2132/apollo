@@ -32,7 +32,7 @@ from common.frechet_distance import frechet_distance
 class PlannigAnalyzer:
     """planning analyzer"""
 
-    def __init__(self, is_simulation):
+    def __init__(self, arguments):
         """init"""
         self.module_latency = []
         self.trajectory_type_dist = {}
@@ -41,26 +41,85 @@ class PlannigAnalyzer:
         self.error_msg_analyzer = ErrorMsgAnalyzer()
         self.last_adc_trajectory = None
         self.frechet_distance_list = []
-        self.is_simulation = is_simulation
+        self.is_sim = arguments.simulation
         self.hard_break_list = []
         self.total_cycle_num = 0
+
         self.init_point_curvature = []
         self.init_point_dcurvature = []
         self.init_point_accel = []
         self.init_point_decel = []
 
-        self.last_init_point_speed = None
         self.last_init_point_t = None
-        self.breaking_2_3_cnt = 0
-        self.breaking_3_5_cnt = 0
-        self.breaking_5_cnt = 0
-        self.throttle_2_3_cnt = 0
-        self.throttle_3_5_cnt = 0
-        self.throttle_5_cnt = 0
+        self.last_init_point_a = None
+        self.last_init_point = None
+
+        self.centripetal_jerk_list = []
+        self.centripetal_accel_list = []
+        self.jerk_list = []
+
+        self.latency_list = []
+
+        # [2, 4) unit m/s^2
+        self.ACCEL_M_LB = 2
+        self.ACCEL_M_UB = 4
+        self.accel_medium_cnt = 0
+
+        # [4, ) unit m/s^2
+        self.ACCEL_H_LB = 4
+        self.accel_high_cnt = 0
+
+        # [-4, -2)
+        self.DECEL_M_LB = -4
+        self.DECEL_M_UB = -2
+        self.decel_medium_cnt = 0
+
+        # [-4, )
+        self.DECEL_H_UB = -4
+        self.decel_high_cnt = 0
+
+        # [1,2) (-2, -1]
+        self.JERK_M_LB_P = 1
+        self.JERK_M_UB_P = 2
+        self.JERK_M_LB_N = -2
+        self.JERK_M_UB_N = -1
+        self.jerk_medium_cnt = 0
+
+        # [2, inf) (-inf, -2]
+        self.JERK_H_LB_P = 2
+        self.JERK_H_UB_N = -2
+        self.jerk_high_cnt = 0
+
+        # [1, 2) [-2, -1)
+        self.LAT_ACCEL_M_LB_P = 1
+        self.LAT_ACCEL_M_UB_P = 2
+        self.LAT_ACCEL_M_LB_N = -2
+        self.LAT_ACCEL_M_UB_N = -1
+        self.lat_accel_medium_cnt = 0
+
+        # [2, inf)  [-inf,-2)
+        self.LAT_ACCEL_H_LB_P = 2
+        self.LAT_ACCEL_H_UB_N = -2
+        self.lat_accel_high_cnt = 0
+
+        # [0.5,1) [-1, -0.5)
+        self.LAT_JERK_M_LB_P = 0.5
+        self.LAT_JERK_M_UB_P = 1
+        self.LAT_JERK_M_LB_N = -1
+        self.LAT_JERK_M_UB_N = -0.5
+        self.lat_jerk_medium_cnt = 0
+
+        # [1, inf)  [-inf,-1)
+        self.LAT_JERK_H_LB_P = 1
+        self.LAT_JERK_H_UB_N = -1
+        self.lat_jerk_high_cnt = 0
+
+        self.bag_start_time_t = None
+        self.print_acc = arguments.showacc
 
     def put(self, adc_trajectory):
         self.total_cycle_num += 1
-        if not self.is_simulation:
+        if not self.is_sim:
             latency = adc_trajectory.latency_stats.total_time_ms
             self.module_latency.append(latency)
 
@@ -78,40 +137,88 @@ class PlannigAnalyzer:
                     self.estop_reason_dist.get(
                         adc_trajectory.estop.reason, 0) + 1
 
-        if self.is_simulation:
-            if adc_trajectory.debug.planning_data.HasField('init_point'):
-                self.init_point_curvature.append(
-                    abs(adc_trajectory.debug.planning_data.init_point.path_point.kappa))
-                self.init_point_dcurvature.append(
-                    abs(adc_trajectory.debug.planning_data.init_point.path_point.dkappa))
+        if self.is_sim:
+            self.latency_list.append(adc_trajectory.latency_stats.total_time_ms)
 
-                speed = adc_trajectory.debug.planning_data.init_point.v
-                t = adc_trajectory.header.timestamp_sec + \
-                    adc_trajectory.debug.planning_data.init_point.relative_time
-                if self.last_init_point_speed is not None:
-                    duration = t - self.last_init_point_t
-                    accel = (speed - self.last_init_point_speed) / duration
-                    if accel > 0:
-                        self.init_point_accel.append(accel)
-                    if accel < 0:
-                        self.init_point_decel.append(abs(accel))
-                        
-                    if -3 < accel <= -2:
-                        self.breaking_2_3_cnt += 1
-                    if -5 < accel <= -3:
-                        self.breaking_3_5_cnt += 1
-                    if accel <= -5:
-                        self.breaking_5_cnt += 1
+            if not adc_trajectory.debug.planning_data.HasField('init_point'):
+                return
 
-                    if 2 <= accel < 3:
-                        self.throttle_2_3_cnt += 1
-                    if 3 <= accel < 5:
-                        self.throttle_3_5_cnt += 1
-                    if 5 <= accel :
-                        self.throttle_5_cnt += 1
+            init_point = adc_trajectory.debug.planning_data.init_point
 
-                self.last_init_point_speed = speed
-                self.last_init_point_t = t
+            self.init_point_curvature.append(abs(init_point.path_point.kappa))
+            self.init_point_dcurvature.append(abs(init_point.path_point.dkappa))
+
+            t = adc_trajectory.header.timestamp_sec + init_point.relative_time
+
+            if self.bag_start_time_t is None:
+                self.bag_start_time_t = t
+
+            accel = None
+            jerk = None
+            duration = 0
+            if self.last_init_point_t is not None:
+                duration = t - self.last_init_point_t
+            if self.last_init_point is not None and duration > 0.03:
+                accel = (init_point.v - self.last_init_point.v) / duration
+                if self.print_acc and abs(accel) > 4:
+                    print("---------------")
+                    print(t - self.bag_start_time_t, "acc = ", accel)
+                if accel > 0:
+                    self.init_point_accel.append(accel)
+                elif accel < 0:
+                    self.init_point_decel.append(abs(accel))
+
+                if self.DECEL_M_LB < accel <= self.DECEL_M_UB:
+                    self.decel_medium_cnt += 1
+                if accel <= self.DECEL_H_UB:
+                    self.decel_high_cnt += 1
+
+                if self.ACCEL_M_LB <= accel < self.ACCEL_M_UB:
+                    self.accel_medium_cnt += 1
+                if self.ACCEL_H_LB <= accel:
+                    self.accel_high_cnt += 1
+
+                if self.last_init_point_a is not None:
+                    if duration <= 0:
+                        jerk = 0
+                    else:
+                        jerk = (accel - self.last_init_point_a) / duration
+                    self.jerk_list.append(abs(jerk))
+
+                    if self.JERK_M_LB_P <= jerk < self.JERK_M_UB_P or \
+                        self.JERK_M_LB_N < jerk <= self.JERK_M_UB_N:
+                        self.jerk_medium_cnt += 1
+                    if jerk >= self.JERK_H_LB_P or jerk <= self.JERK_H_UB_N:
+                        self.jerk_high_cnt += 1
+
+                # centripetal_jerk
+                centripetal_jerk = 2 * init_point.v * init_point.a \
+                    * init_point.path_point.kappa + init_point.v \
+                        * init_point.v * init_point.path_point.dkappa
+                self.centripetal_jerk_list.append(abs(centripetal_jerk))
+
+                if self.LAT_JERK_M_LB_P <= centripetal_jerk < self.LAT_JERK_M_UB_P \
+                    or self.LAT_JERK_M_LB_N < centripetal_jerk <= self.LAT_JERK_M_UB_N:
+                    self.lat_jerk_medium_cnt += 1
+                if centripetal_jerk >= self.LAT_JERK_H_LB_P \
+                    or centripetal_jerk <= self.LAT_JERK_H_UB_N:
+                    self.lat_jerk_high_cnt += 1
+
+                # centripetal_accel
+                centripetal_accel = init_point.v * init_point.v \
+                    * init_point.path_point.kappa
+                self.centripetal_accel_list.append(abs(centripetal_accel))
+
+                if self.LAT_ACCEL_M_LB_P <= centripetal_accel < self.LAT_ACCEL_M_UB_P \
+                    or self.LAT_ACCEL_M_LB_N < centripetal_accel <= self.LAT_ACCEL_M_UB_N:
+                    self.lat_accel_medium_cnt += 1
+                if centripetal_accel >= self.LAT_ACCEL_H_LB_P \
+                    or centripetal_accel <= self.LAT_ACCEL_H_UB_N:
+                    self.lat_accel_high_cnt += 1
+
+            self.last_init_point_t = t
+            self.last_init_point = init_point
+            self.last_init_point_a = accel
 
         # TODO(yifei) temporarily disable frechet distance
         #if self.last_adc_trajectory is not None and self.is_simulation:
@@ -205,48 +312,78 @@ class PlannigAnalyzer:
             PrintColors.ENDC
         StatisticalAnalyzer().print_statistical_results(self.frechet_distance_list)
 
-    def print_simulation_results(self):
-        results = {}
+    def print_sim_results(self):
+        """
+        dreamland metrics for planning v2
+        """
+        v2_results = {}
 
-        results['decel_2_3'] = self.breaking_2_3_cnt
-        results['decel_3_5'] = self.breaking_3_5_cnt
-        results['decel_5_'] = self.breaking_5_cnt
-
-        results['accel_2_3'] = self.throttle_2_3_cnt
-        results['accel_3_5'] = self.throttle_3_5_cnt
-        results['accel_5_'] = self.throttle_5_cnt
-
-        if len(self.init_point_curvature) > 0:
-            results['curvature_max'] = max(self.init_point_curvature, key=abs)
-            curvature_avg = np.average(np.absolute(self.init_point_curvature))
-            results['curvature_avg'] = curvature_avg
-        else:
-            results['curvature_max'] = None
-            results['curvature_avg'] = None
-
-        if len(self.init_point_dcurvature) > 0:
-            results['dcurvature_max'] = max(self.init_point_dcurvature, key=abs)
-            dcurvature_avg = np.average(np.absolute(self.init_point_dcurvature))
-            results['dcurvature_avg'] = dcurvature_avg
-        else:
-            results['dcurvature_max'] = None
-            results['dcurvature_avg'] = None
-
+        # acceleration
+        v2_results["accel"] = {}
         if len(self.init_point_accel) > 0:
-            results["accel_max"] = max(self.init_point_accel)
-            results["accel_avg"] = np.average(self.init_point_accel)
+            v2_results["accel"]["max"] = max(self.init_point_accel)
+            v2_results["accel"]["avg"] = np.average(self.init_point_accel)
         else:
-            results["accel_max"] = 0
-            results["accel_avg"] = 0
-        
-        if len(self.init_point_decel) > 0:
-            results["decel_max"] = max(self.init_point_decel)
-            results["decel_avg"] = np.average(self.init_point_decel)
-        else:
-            results["decel_max"] = 0
-            results["decel_avg"] = 0
+            v2_results["accel"]["max"] = 0.0
+            v2_results["accel"]["avg"] = 0.0
+        v2_results["accel"]["medium_cnt"] = self.accel_medium_cnt
+        v2_results["accel"]["high_cnt"] = self.accel_high_cnt
 
-        print json.dumps(results)
+        # deceleration
+        v2_results["decel"] = {}
+        if len(self.init_point_decel) > 0:
+            v2_results["decel"]["max"] = max(self.init_point_decel)
+            v2_results["decel"]["avg"] = np.average(self.init_point_decel)
+        else:
+            v2_results["decel"]["max"] = 0.0
+            v2_results["decel"]["avg"] = 0.0
+        v2_results["decel"]["medium_cnt"] = self.decel_medium_cnt
+        v2_results["decel"]["high_cnt"] = self.decel_high_cnt
+
+        # jerk
+        v2_results["jerk"] = {}
+        if len(self.jerk_list) > 0:
+            v2_results["jerk"]["max"] = max(self.jerk_list, key=abs)
+            jerk_avg = np.average(np.absolute(self.jerk_list))
+            v2_results["jerk"]["avg"] = jerk_avg
+        else:
+            v2_results["jerk"]["max"] = 0
+            v2_results["jerk"]["avg"] = 0
+        v2_results["jerk"]["medium_cnt"] = self.jerk_medium_cnt
+        v2_results["jerk"]["high_cnt"] = self.jerk_high_cnt
+
+        # centripetal_jerk
+        v2_results["lat_jerk"] = {}
+        if len(self.centripetal_jerk_list) > 0:
+            v2_results["lat_jerk"]["max"] = max(self.centripetal_jerk_list, key=abs)
+            jerk_avg = np.average(np.absolute(self.centripetal_jerk_list))
+            v2_results["lat_jerk"]["avg"] = jerk_avg
+        else:
+            v2_results["lat_jerk"]["max"] = 0
+            v2_results["lat_jerk"]["avg"] = 0
+        v2_results["lat_jerk"]["medium_cnt"] = self.lat_jerk_medium_cnt
+        v2_results["lat_jerk"]["high_cnt"] = self.lat_jerk_high_cnt
+
+        # centripetal_accel
+        v2_results["lat_accel"] = {}
+        if len(self.centripetal_accel_list) > 0:
+            v2_results["lat_accel"]["max"] = max(self.centripetal_accel_list, key=abs)
+            accel_avg = np.average(np.absolute(self.centripetal_accel_list))
+            v2_results["lat_accel"]["avg"] = accel_avg
+        else:
+            v2_results["lat_accel"]["max"] = 0
+            v2_results["lat_accel"]["avg"] = 0
+        v2_results["lat_accel"]["medium_cnt"] = self.lat_accel_medium_cnt
+        v2_results["lat_accel"]["high_cnt"] = self.lat_accel_high_cnt
+
+        # lantency
+        v2_results["planning_latency"] = {
+            "max" : max(self.latency_list),
+            "min" : min(self.latency_list),
+            "avg" : np.average(self.latency_list)
+        }
+
+        print json.dumps(v2_results)
 
     def plot_path(self, plt, adc_trajectory):
         path_coords = self.trim_path_by_distance(adc_trajectory, 5.0)

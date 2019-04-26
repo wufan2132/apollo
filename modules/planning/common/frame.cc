@@ -49,8 +49,6 @@ using apollo::common::math::Polygon2d;
 using apollo::common::time::Clock;
 using apollo::prediction::PredictionObstacles;
 
-constexpr double kMathEpsilon = 1e-8;
-
 FrameHistory::FrameHistory()
     : IndexedQueue<uint32_t, Frame>(FLAGS_max_history_frame_num) {}
 
@@ -124,14 +122,11 @@ bool Frame::Rerouting() {
     return false;
   }
 
-  PlanningContext::MutablePlanningStatus()
-      ->mutable_rerouting()
-      ->set_need_rerouting(true);
-
-  PlanningContext::MutablePlanningStatus()
-      ->mutable_rerouting()
-      ->mutable_routing_request()
-      ->CopyFrom(request);
+  auto *rerouting = PlanningContext::Instance()
+                        ->mutable_planning_status()
+                        ->mutable_rerouting();
+  rerouting->set_need_rerouting(true);
+  *rerouting->mutable_routing_request() = request;
 
   monitor_logger_buffer_.INFO("Planning send Rerouting request");
   return true;
@@ -371,7 +366,7 @@ Status Frame::InitFrameData() {
        Obstacle::CreateObstacles(*local_view_.prediction_obstacles)) {
     AddObstacle(*ptr);
   }
-  if (FLAGS_enable_collision_detection && planning_start_point_.v() < 1e-3) {
+  if (planning_start_point_.v() < 1e-3) {
     const auto *collision_obstacle = FindCollisionObstacle();
     if (collision_obstacle != nullptr) {
       std::string err_str =

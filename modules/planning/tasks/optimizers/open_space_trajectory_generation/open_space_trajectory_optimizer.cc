@@ -71,14 +71,19 @@ common::Status OpenSpaceTrajectoryOptimizer::Plan(
 
   // Initiate initial states
   stitching_trajectory_ = stitching_trajectory;
-  common::TrajectoryPoint init_trajectory_point = stitching_trajectory.back();
-  common::PathPoint init_path_point = init_trajectory_point.path_point();
-  double init_x = init_path_point.x();
-  double init_y = init_path_point.y();
-  double init_phi = init_path_point.theta();
-  double init_v = init_trajectory_point.v();
-  double init_steer = init_trajectory_point.steer();
-  double init_a = init_trajectory_point.a();
+
+  // Init trajectory point is the stitching point from last trajectory
+  const common::TrajectoryPoint trajectory_stitching_point =
+      stitching_trajectory.back();
+
+  // init x, y, z would be rotated.
+  double init_x = trajectory_stitching_point.path_point().x();
+  double init_y = trajectory_stitching_point.path_point().y();
+  double init_phi = trajectory_stitching_point.path_point().theta();
+
+  const double init_v = trajectory_stitching_point.v();
+  const double init_steer = trajectory_stitching_point.steer();
+  const double init_a = trajectory_stitching_point.a();
 
   // Rotate and scale the state
   PathPointNormalizing(rotate_angle, translate_origin, &init_x, &init_y,
@@ -102,7 +107,7 @@ common::Status OpenSpaceTrajectoryOptimizer::Plan(
                         xF(2, 0), XYbounds, obstacles_vertices_vec, &result)) {
     ADEBUG << "State warm start problem solved successfully!";
   } else {
-    AERROR << "State warm start problem failed to solve";
+    ADEBUG << "State warm start problem failed to solve";
     return Status(ErrorCode::PLANNING_ERROR,
                   "State warm start problem failed to solve");
   }
@@ -129,7 +134,17 @@ common::Status OpenSpaceTrajectoryOptimizer::Plan(
   uWS.row(0) = steer;
   uWS.row(1) = a;
 
-  // Result container for distance approach problem
+  // Clean update records
+  open_space_debug_.Clear();
+
+  // record debug info
+  if (FLAGS_enable_record_debug) {
+    RecordWarmStartDebugInfo(horizon, trajectory_stitching_point,
+                             translate_origin, rotate_angle, end_pose, xWS, uWS,
+                             XYbounds, obstacles_vertices_vec);
+  }
+
+  // Result container for dual variable warm up problem
   Eigen::MatrixXd l_warm_up;
   Eigen::MatrixXd n_warm_up;
 
@@ -154,8 +169,13 @@ common::Status OpenSpaceTrajectoryOptimizer::Plan(
             horizon, ts, ego, obstacles_num, obstacles_edges_num, obstacles_A,
             obstacles_b, xWS, &l_warm_up, &n_warm_up)) {
       ADEBUG << "Dual variable problem solved successfully!";
+
+      // record debug info
+      if (FLAGS_enable_record_debug) {
+        RecordDualVariableWarmStartDebugInfo(horizon, l_warm_up, n_warm_up);
+      }
     } else {
-      AERROR << "Dual variable problem failed to solve";
+      ADEBUG << "Dual variable problem failed to solve";
       return Status(ErrorCode::PLANNING_ERROR,
                     "Dual variable problem failed to solve");
     }
@@ -179,18 +199,22 @@ common::Status OpenSpaceTrajectoryOptimizer::Plan(
           &dual_l_result_ds, &dual_n_result_ds)) {
     ADEBUG << "Distance approach problem solved successfully!";
   } else {
-    AERROR << "Distance approach problem failed to solve";
-    return Status(ErrorCode::PLANNING_ERROR,
-                  "Distance approach problem failed to solve");
+    ADEBUG << "Distance approach problem failed to solve";
+    if (FLAGS_enable_smoother_failsafe) {
+      UseWarmStartAsResult(xWS, uWS, l_warm_up, n_warm_up, &state_result_ds,
+                           &control_result_ds, &time_result_ds,
+                           &dual_l_result_ds, &dual_n_result_ds);
+    } else {
+      return Status(ErrorCode::PLANNING_ERROR,
+                    "Distance approach problem failed to solve");
+    }
   }
 
   // record debug info
   if (FLAGS_enable_record_debug) {
     open_space_debug_.Clear();
-    RecordDebugInfo(translate_origin, rotate_angle, end_pose, xWS, uWS,
-                    l_warm_up, n_warm_up, dual_l_result_ds, dual_n_result_ds,
-                    state_result_ds, control_result_ds, time_result_ds,
-                    XYbounds, obstacles_vertices_vec);
+    RecordSmootherDebugInfo(horizon, dual_l_result_ds, dual_n_result_ds,
+                            state_result_ds, control_result_ds, time_result_ds);
   }
 
   // rescale the states to the world frame
@@ -205,17 +229,17 @@ common::Status OpenSpaceTrajectoryOptimizer::Plan(
   return Status::OK();
 }
 
-void OpenSpaceTrajectoryOptimizer::RecordDebugInfo(
-    const Vec2d& translate_origin, const double& rotate_angle,
+void OpenSpaceTrajectoryOptimizer::RecordWarmStartDebugInfo(
+    const size_t horizon,
+    const common::TrajectoryPoint& trajectory_stitching_point,
+    const Vec2d& translate_origin, const double rotate_angle,
     const std::vector<double>& end_pose, const Eigen::MatrixXd& xWS,
-    const Eigen::MatrixXd& uWS, const Eigen::MatrixXd& l_warm_up,
-    const Eigen::MatrixXd& n_warm_up, const Eigen::MatrixXd& dual_l_result_ds,
-    const Eigen::MatrixXd& dual_n_result_ds,
-    const Eigen::MatrixXd& state_result_ds,
-    const Eigen::MatrixXd& control_result_ds,
-    const Eigen::MatrixXd& time_result_ds, const std::vector<double>& XYbounds,
+    const Eigen::MatrixXd& uWS, const std::vector<double>& XYbounds,
     const std::vector<std::vector<common::math::Vec2d>>&
         obstacles_vertices_vec) {
+  // load information about trajectory stitching point
+  open_space_debug_.mutable_trajectory_stitching_point()->CopyFrom(
+      trajectory_stitching_point);
   // load translation origin and heading angle
   auto* roi_shift_point = open_space_debug_.mutable_roi_shift_point();
   // pathpoint
@@ -230,8 +254,6 @@ void OpenSpaceTrajectoryOptimizer::RecordDebugInfo(
   end_point->mutable_path_point()->set_theta(end_pose[2]);
   end_point->set_v(end_pose[3]);
 
-  // load warm start trajectory
-  size_t horizon = uWS.cols();
   auto* warm_start_trajectory =
       open_space_debug_.mutable_warm_start_trajectory();
   for (size_t i = 0; i < horizon; ++i) {
@@ -256,28 +278,54 @@ void OpenSpaceTrajectoryOptimizer::RecordDebugInfo(
       xWS(2, horizon));
   warm_start_point->mutable_trajectory_point()->set_v(xWS(3, horizon));
 
+  // load xy boundary (xmin, xmax, ymin, ymax)
+  open_space_debug_.add_xy_boundary(XYbounds[0]);
+  open_space_debug_.add_xy_boundary(XYbounds[1]);
+  open_space_debug_.add_xy_boundary(XYbounds[2]);
+  open_space_debug_.add_xy_boundary(XYbounds[3]);
+
+  // load obstacles
+  for (const auto& obstacle_vertices : obstacles_vertices_vec) {
+    auto* obstacle_ptr = open_space_debug_.add_obstacles();
+    for (const auto& vertex : obstacle_vertices) {
+      obstacle_ptr->add_vertices_x_coords(vertex.x());
+      obstacle_ptr->add_vertices_y_coords(vertex.y());
+    }
+  }
+}
+
+void OpenSpaceTrajectoryOptimizer::RecordDualVariableWarmStartDebugInfo(
+    const size_t horizon, const Eigen::MatrixXd& l_warm_up,
+    const Eigen::MatrixXd& n_warm_up) {
   // load warm start dual variables
-  size_t l_warm_up_cols = l_warm_up.rows();
+  const size_t l_warm_up_cols = l_warm_up.rows();
   for (size_t i = 0; i < horizon; ++i) {
     for (size_t j = 0; j < l_warm_up_cols; j++) {
       open_space_debug_.add_warm_start_dual_lambda(l_warm_up(j, i));
     }
   }
-  size_t n_warm_up_cols = n_warm_up.rows();
+  const size_t n_warm_up_cols = n_warm_up.rows();
   for (size_t i = 0; i < horizon; ++i) {
     for (size_t j = 0; j < n_warm_up_cols; j++) {
       open_space_debug_.add_warm_start_dual_miu(n_warm_up(j, i));
     }
   }
+}
 
+void OpenSpaceTrajectoryOptimizer::RecordSmootherDebugInfo(
+    const size_t horizon, const Eigen::MatrixXd& dual_l_result_ds,
+    const Eigen::MatrixXd& dual_n_result_ds,
+    const Eigen::MatrixXd& state_result_ds,
+    const Eigen::MatrixXd& control_result_ds,
+    const Eigen::MatrixXd& time_result_ds) {
   // load optimized dual variables
-  size_t dual_l_result_ds_cols = dual_l_result_ds.rows();
+  const size_t dual_l_result_ds_cols = dual_l_result_ds.rows();
   for (size_t i = 0; i < horizon; ++i) {
     for (size_t j = 0; j < dual_l_result_ds_cols; j++) {
       open_space_debug_.add_optimized_dual_lambda(dual_l_result_ds(j, i));
     }
   }
-  size_t dual_n_result_ds_cols = dual_n_result_ds.rows();
+  const size_t dual_n_result_ds_cols = dual_n_result_ds.rows();
   for (size_t i = 0; i < horizon; ++i) {
     for (size_t j = 0; j < dual_n_result_ds_cols; j++) {
       open_space_debug_.add_optimized_dual_miu(dual_n_result_ds(j, i));
@@ -312,22 +360,10 @@ void OpenSpaceTrajectoryOptimizer::RecordDebugInfo(
       state_result_ds(2, horizon));
   smoothed_point->mutable_trajectory_point()->set_v(
       state_result_ds(3, horizon));
+  smoothed_point->set_steer(0.0);
+  smoothed_point->mutable_trajectory_point()->set_a(0.0);
   relative_time += time_result_ds(0, horizon);
   smoothed_point->mutable_trajectory_point()->set_relative_time(relative_time);
-  // load xy boundary (xmin, xmax, ymin, ymax)
-  open_space_debug_.add_xy_boundary(XYbounds[0]);
-  open_space_debug_.add_xy_boundary(XYbounds[1]);
-  open_space_debug_.add_xy_boundary(XYbounds[2]);
-  open_space_debug_.add_xy_boundary(XYbounds[3]);
-
-  // load obstacles
-  for (const auto& obstacle_vertices : obstacles_vertices_vec) {
-    auto* obstacle_ptr = open_space_debug_.add_obstacles();
-    for (const auto& vertex : obstacle_vertices) {
-      obstacle_ptr->add_vertices_x_coords(vertex.x());
-      obstacle_ptr->add_vertices_y_coords(vertex.y());
-    }
-  }
 }
 
 void OpenSpaceTrajectoryOptimizer::UpdateDebugInfo(
@@ -415,6 +451,28 @@ void OpenSpaceTrajectoryOptimizer::LoadTrajectory(
     optimized_trajectory_.emplace_back(point);
     last_path_point = cur_path_point;
   }
+}
+
+void OpenSpaceTrajectoryOptimizer::UseWarmStartAsResult(
+    const Eigen::MatrixXd& xWS, const Eigen::MatrixXd& uWS,
+    const Eigen::MatrixXd& l_warm_up, const Eigen::MatrixXd& n_warm_up,
+    Eigen::MatrixXd* state_result_ds, Eigen::MatrixXd* control_result_ds,
+    Eigen::MatrixXd* time_result_ds, Eigen::MatrixXd* dual_l_result_ds,
+    Eigen::MatrixXd* dual_n_result_ds) {
+  AERROR << "Use warm start as trajectory output";
+
+  *state_result_ds = xWS;
+  *control_result_ds = uWS;
+  *dual_l_result_ds = l_warm_up;
+  *dual_n_result_ds = n_warm_up;
+
+  control_result_ds->conservativeResize(control_result_ds->rows(),
+                                        control_result_ds->cols() + 1);
+  control_result_ds->col(control_result_ds->cols() - 1) << 0.0, 0.0;
+
+  size_t time_result_horizon = xWS.cols();
+  *time_result_ds = Eigen::MatrixXd::Constant(
+      1, time_result_horizon, config_.planner_open_space_config().delta_t());
 }
 
 }  // namespace planning

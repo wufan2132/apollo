@@ -19,6 +19,7 @@
  */
 
 #include "modules/planning/open_space/trajectory_smoother/distance_approach_problem.h"
+#include <string>
 
 namespace apollo {
 namespace planning {
@@ -30,11 +31,11 @@ DistanceApproachProblem::DistanceApproachProblem(
 
 bool DistanceApproachProblem::Solve(
     const Eigen::MatrixXd& x0, const Eigen::MatrixXd& xF,
-    const Eigen::MatrixXd& last_time_u, const size_t& horizon, const double& ts,
+    const Eigen::MatrixXd& last_time_u, const size_t horizon, const double ts,
     const Eigen::MatrixXd& ego, const Eigen::MatrixXd& xWS,
     const Eigen::MatrixXd& uWS, const Eigen::MatrixXd& l_warm_up,
     const Eigen::MatrixXd& n_warm_up, const std::vector<double>& XYbounds,
-    const size_t& obstacles_num, const Eigen::MatrixXi& obstacles_edges_num,
+    const size_t obstacles_num, const Eigen::MatrixXi& obstacles_edges_num,
     const Eigen::MatrixXd& obstacles_A, const Eigen::MatrixXd& obstacles_b,
     Eigen::MatrixXd* state_result, Eigen::MatrixXd* control_result,
     Eigen::MatrixXd* time_result, Eigen::MatrixXd* dual_l_result,
@@ -128,18 +129,45 @@ bool DistanceApproachProblem::Solve(
       status == Ipopt::Solved_To_Acceptable_Level) {
     // Retrieve some statistics about the solve
     Ipopt::Index iter_count = app->Statistics()->IterationCount();
-    AINFO << "*** The problem solved in " << iter_count << " iterations!";
+    ADEBUG << "*** The problem solved in " << iter_count << " iterations!";
 
     Ipopt::Number final_obj = app->Statistics()->FinalObjective();
-    AINFO << "*** The final value of the objective function is " << final_obj
-          << '.';
+    ADEBUG << "*** The final value of the objective function is " << final_obj
+           << '.';
 
     auto t_end = cyber::Time::Now().ToSecond();
 
     AINFO << "DistanceApproachProblem solving time in second : "
           << t_end - t_start;
   } else {
-    AINFO << "Solve not succeeding, return status: " << int(status);
+    // return detailed failure information,
+    // reference resource: Ipopt::ApplicationReturnStatus
+    std::vector<std::string> failure_status = {
+        "Solve_Succeeded",
+        "Solved_To_Acceptable_Level",
+        "Infeasible_Problem_Detected",
+        "Search_Direction_Becomes_Too_Small",
+        "Diverging_Iterates",
+        "User_Requested_Stop",
+        "Feasible_Point_Found",
+        "Maximum_Iterations_Exceeded",
+        "Restoration_Failed",
+        "Error_In_Step_Computation",
+        "Not_Enough_Degrees_Of_Freedom",
+        "Invalid_Problem_Definition",
+        "Invalid_Option",
+        "Invalid_Number_Detected",
+        "Unrecoverable_Exception",
+        "NonIpopt_Exception_Thrown"
+        "Insufficient_Memory",
+        "Internal_Error"};
+    if (static_cast<size_t>(status) >= failure_status.size()) {
+      AINFO << "Solver ends with unknown failure code: "
+            << static_cast<int>(status);
+    } else {
+      AINFO << "Solver failure case: "
+            << failure_status[static_cast<size_t>(status)];
+    }
   }
 
   ptop->get_optimization_results(state_result, control_result, time_result,

@@ -16,6 +16,8 @@
 
 #include "modules/planning/common/planning_gflags.h"
 
+#include <limits>
+
 DEFINE_bool(planning_test_mode, false, "Enable planning test mode.");
 
 DEFINE_double(test_duration, -1.0,
@@ -23,10 +25,6 @@ DEFINE_double(test_duration, -1.0,
               "the value is not positive");
 
 DEFINE_int32(planning_loop_rate, 10, "Loop rate for planning node");
-
-// TODO(all) enable this when perception issue is fixed.
-DEFINE_bool(enable_collision_detection, false,
-            "enable collision detection in planning");
 
 // scenario related
 DEFINE_string(scenario_bare_intersection_unprotected_config_file,
@@ -36,10 +34,18 @@ DEFINE_string(scenario_bare_intersection_unprotected_config_file,
 DEFINE_string(scenario_lane_follow_config_file,
               "/apollo/modules/planning/conf/"
               "scenario/lane_follow_config.pb.txt",
-              "The lane follow scenario configuration file");
+              "The lane_follow scenario configuration file");
+DEFINE_string(scenario_narrow_street_u_turn_config_file,
+              "/apollo/modules/planning/conf/"
+              "scenario/narrow_street_u_turn_config.pb.txt",
+              "narrow_street_u_turn scenario config file");
+DEFINE_string(scenario_pull_over_config_file,
+              "/apollo/modules/planning/conf/"
+              "scenario/pull_over_config.pb.txt",
+              "The pull_over scenario configuration file");
 DEFINE_string(scenario_side_pass_config_file,
               "/apollo/modules/planning/conf/scenario/side_pass_config.pb.txt",
-              "side pass scenario configuration file");
+              "side_pass scenario configuration file");
 DEFINE_string(scenario_stop_sign_unprotected_config_file,
               "/apollo/modules/planning/conf/"
               "scenario/stop_sign_unprotected_config.pb.txt",
@@ -47,23 +53,25 @@ DEFINE_string(scenario_stop_sign_unprotected_config_file,
 DEFINE_string(scenario_traffic_light_protected_config_file,
               "/apollo/modules/planning/conf/"
               "scenario/traffic_light_protected_config.pb.txt",
-              "scenario_traffic_light_protected config file");
+              "traffic_light_protected scenario config file");
 DEFINE_string(scenario_traffic_light_unprotected_left_turn_config_file,
               "/apollo/modules/planning/conf/"
               "scenario/traffic_light_unprotected_left_turn_config.pb.txt",
-              "scenario_traffic_light_unprotected_left_turn config file");
+              "traffic_light_unprotected_left_turn scenario config file");
 DEFINE_string(scenario_traffic_light_unprotected_right_turn_config_file,
               "/apollo/modules/planning/conf/"
               "scenario/traffic_light_unprotected_right_turn_config.pb.txt",
-              "scenario_traffic_light_unprotected_right_turn config file");
+              "traffic_light_unprotected_right_turn scenario config file");
 DEFINE_string(scenario_valet_parking_config_file,
               "/apollo/modules/planning/conf/"
               "scenario/valet_parking_config.pb.txt",
-              "scenario_valet_parking config file");
-DEFINE_string(scenario_narrow_street_u_turn_config_file,
-              "/apollo/modules/planning/conf/"
-              "scenario/narrow_street_u_turn_config.pb.txt",
-              "scenario_narrow_street_u_turn config file");
+              "valet_parking scenario config file");
+
+DEFINE_bool(enable_scenario_bare_intersection, false,
+            "enable bare_intersection scenarios in planning");
+
+DEFINE_bool(enable_scenario_pull_over, false,
+            "enable side pass scenario in planning");
 
 DEFINE_bool(enable_scenario_side_pass, true,
             "enable side pass scenario in planning");
@@ -74,10 +82,9 @@ DEFINE_bool(enable_scenario_side_pass_multiple_parked_obstacles, true,
             "enable ADC to side-pass multiple parked obstacles without"
             "worrying if the obstacles are blocked by others.");
 
-DEFINE_bool(enable_scenario_bare_intersection, false,
-            "enable bare_intersection scenarios in planning");
 DEFINE_bool(enable_scenario_stop_sign, true,
             "enable stop_sign scenarios in planning");
+
 DEFINE_bool(enable_scenario_traffic_light, true,
             "enable traffic_light scenarios in planning");
 
@@ -200,6 +207,8 @@ DEFINE_double(longitudinal_jerk_lower_bound, -4.0,
               "The lower bound of longitudinal jerk.");
 DEFINE_double(longitudinal_jerk_upper_bound, 4.0,
               "The upper bound of longitudinal jerk.");
+DEFINE_double(longitudinal_jerk_bound, 4.0,
+              "Bound of longitudinal jerk; symmetric for front and back");
 DEFINE_double(lateral_jerk_bound, 4.0,
               "Bound of lateral jerk; symmetric for left and right");
 
@@ -410,6 +419,9 @@ DEFINE_bool(use_planning_fallback, true,
 DEFINE_double(fallback_total_time, 3.0, "total fallback trajectory time");
 DEFINE_double(fallback_time_unit, 0.02,
               "fallback trajectory unit time in seconds");
+DEFINE_double(
+    fallback_distance_buffer, 0.5,
+    "fallback distance to end buffer when doing fixed distance speed fallback");
 DEFINE_double(polynomial_speed_fallback_velocity, 3.5,
               "velocity to use polynomial speed fallback.");
 
@@ -453,6 +465,14 @@ DEFINE_bool(use_dual_variable_warm_start, true,
 DEFINE_bool(use_gear_shift_trajectory, false,
             "allow some time for the vehicle to shift gear");
 
+DEFINE_uint32(open_space_trajectory_stitching_preserved_length,
+              std::numeric_limits<uint32_t>::infinity(),
+              "preserved points number in trajectory stitching for open space "
+              "trajectory");
+DEFINE_bool(
+    enable_smoother_failsafe, false,
+    "whether to use warm start result as final output when smoother fails");
+
 DEFINE_bool(use_osqp_optimizer_for_qp_st, false,
             "Use OSQP optimizer for QpSt speed optimization.");
 DEFINE_bool(use_osqp_optimizer_for_reference_line, true,
@@ -472,6 +492,8 @@ DEFINE_double(max_trajectory_len, 1000.0,
               "(unit: meter) max possible trajectory length.");
 DEFINE_bool(enable_rss_fallback, false, "trigger rss fallback");
 DEFINE_bool(enable_rss_info, true, "enable rss_info in trajectory_pb");
+DEFINE_double(rss_max_front_obstacle_distance, 3000.0,
+              "(unit: meter) for max front obstacle distance.");
 
 DEFINE_bool(
     enable_planning_smoother, true,
@@ -502,8 +524,6 @@ DEFINE_double(side_pass_driving_width_l_buffer, 0.1,
 
 DEFINE_bool(enable_parallel_hybrid_a, false,
             "True to enable hybrid a* parallel implementation.");
-DEFINE_bool(enable_parallel_open_space_smoother, false,
-            "True to enable open space smoother parallel implementation.");
 
 DEFINE_double(vehicle_low_speed_threshold, 1.0, "Vehicle low speed threshold.");
 
@@ -514,3 +534,10 @@ DEFINE_bool(enable_nonscenario_side_pass, false,
 
 DEFINE_bool(enable_soft_speed_limit, false,
             "True to set soft speed limit guided by path optimization result");
+
+DEFINE_double(message_latency_threshold, 0.02, "Threshold for message delay");
+DEFINE_bool(enable_lane_change_urgency_checking, false,
+            "True to check the urgency of lane changing");
+
+DEFINE_uint32(trajectory_stitching_preserved_length, 20,
+              "preserved points number in trajectory stitching");

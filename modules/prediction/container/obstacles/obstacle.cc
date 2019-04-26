@@ -152,9 +152,9 @@ bool Obstacle::Insert(const PerceptionObstacle& perception_obstacle,
   if (!SetId(perception_obstacle, &feature, prediction_obstacle_id)) {
     return false;
   }
-  if (!SetType(perception_obstacle, &feature)) {
-    return false;
-  }
+
+  SetType(perception_obstacle, &feature);
+
   SetStatus(perception_obstacle, timestamp, &feature);
 
   // Set obstacle observation for KF tracking
@@ -411,12 +411,11 @@ bool Obstacle::SetId(const PerceptionObstacle& perception_obstacle,
   return true;
 }
 
-bool Obstacle::SetType(const PerceptionObstacle& perception_obstacle,
+void Obstacle::SetType(const PerceptionObstacle& perception_obstacle,
                        Feature* feature) {
   type_ = perception_obstacle.type();
   ADEBUG << "Obstacle [" << id_ << "] has type [" << type_ << "].";
   feature->set_type(type_);
-  return true;
 }
 
 void Obstacle::SetTimestamp(const PerceptionObstacle& perception_obstacle,
@@ -1386,14 +1385,16 @@ void Obstacle::SetMotionStatus() {
     AERROR << "Zero history found";
     return;
   }
-  double std = FLAGS_still_obstacle_position_std;
+  double pos_std = FLAGS_still_obstacle_position_std;
   double speed_threshold = FLAGS_still_obstacle_speed_threshold;
   if (type_ == PerceptionObstacle::PEDESTRIAN ||
-      type_ == PerceptionObstacle::BICYCLE ||
-      type_ == PerceptionObstacle::UNKNOWN ||
-      type_ == PerceptionObstacle::UNKNOWN_MOVABLE) {
+      type_ == PerceptionObstacle::BICYCLE) {
     speed_threshold = FLAGS_still_pedestrian_speed_threshold;
-    std = FLAGS_still_pedestrian_position_std;
+    pos_std = FLAGS_still_pedestrian_position_std;
+  } else if (type_ == PerceptionObstacle::UNKNOWN ||
+             type_ == PerceptionObstacle::UNKNOWN_MOVABLE) {
+    speed_threshold = FLAGS_still_unknown_speed_threshold;
+    pos_std = FLAGS_still_unknown_position_std;
   }
   double speed = feature_history_.front().speed();
 
@@ -1428,8 +1429,8 @@ void Obstacle::SetMotionStatus() {
 
   double delta_ts = feature_history_.front().timestamp() -
                     feature_history_.back().timestamp();
-  double speed_sensibility =
-      std::sqrt(2 * history_size) * 4 * std / ((history_size + 1) * delta_ts);
+  double speed_sensibility = std::sqrt(2 * history_size) * 4 * pos_std /
+                             ((history_size + 1) * delta_ts);
   if (speed < speed_threshold) {
     ADEBUG << "Obstacle [" << id_ << "] has a small speed [" << speed
            << "] and is considered stationary.";
@@ -1440,7 +1441,7 @@ void Obstacle::SetMotionStatus() {
     feature_history_.front().set_is_still(false);
   } else {
     double distance = std::hypot(avg_drift_x, avg_drift_y);
-    double distance_std = std::sqrt(2.0 / len) * std;
+    double distance_std = std::sqrt(2.0 / len) * pos_std;
     if (distance > 2.0 * distance_std) {
       ADEBUG << "Obstacle [" << id_ << "] is moving.";
       feature_history_.front().set_is_still(false);
